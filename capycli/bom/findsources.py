@@ -29,6 +29,7 @@ from sw360 import SW360Error
 import capycli.common.script_base
 from capycli import get_logger
 from capycli.common.capycli_bom_support import CaPyCliBom, CycloneDxSupport, SbomWriter
+from capycli.common.comparable_version import ComparableVersion
 from capycli.common.github_support import GitHubSupport
 from capycli.common.print import print_green, print_red, print_text, print_yellow
 from capycli.main.result_codes import ResultCode
@@ -56,8 +57,8 @@ class FindSources(capycli.common.script_base.ScriptBase):
         def _validate_key(self, key: Tuple[str, str]) -> Tuple[str, str]:
             """Ensure our keys are hashable."""
             if len(key) != 2 or key != (str(key[0]), str(key[1])):
-                raise KeyError(f'{self.__class__.__name__} key must consist of'
-                               'a project name and a version string')
+                raise KeyError('key must consist of a project name '
+                               'and a version string')
             return key
 
         def add(self, project: str, version: str, tag: str) -> None:
@@ -69,20 +70,54 @@ class FindSources(capycli.common.script_base.ScriptBase):
         def filter(self, project: str, version: str, data: Any) -> List[str]:
             """Remove all cached entries from @data."""
             if isinstance(data, str):
-                data = [data]
+                data = (data,)
             elif not isinstance(data, Iterable):
                 raise ValueError('Expecting an iterable of tags!')
-            key = self._validate_key((project, version))
-            return [item for item in data
-                    if item not in self.data.get(key, [])
-                    and len(item) > 0]
+            stored = self.data.get((project, version), set())
+            return set(data) - stored - {''}
 
         def filter_and_cache(self, project: str, version: str, data: Any) -> List[str]:
             """Convenience method to to filtering and adding in one run."""
-            candidates = set(self.filter(project, version, data))
+            candidates = self.filter(project, version, data)
             for tag in candidates:
                 self.add(project, version, tag)
-            return list(candidates)
+            candidates = list(reversed(sorted(candidates, key=len)))
+            return candidates
+
+        def gen_new_prefixes(self, project: str, version: str, data: Any,
+                             precision: int = 4 ) -> List[str]:
+            """Generate new tag prefixes for a project and version."""
+            cver = ComparableVersion(version)
+            candidates = []  # output list
+
+            # generate sensible prefixes here and add them to candidates
+            for path in set(tuple(ComparableVersion(d).parts[0:precision])
+                            for d in data):
+                # extract the longest prefix w/o a numberical component
+                # remember what we believe is the version separator
+                prefix = ""
+                sep = ""
+                for (is_digit, part, sep) in path:
+                    if is_digit is True:
+                        break
+                    prefix += part + sep
+                # now lets render variants, w/ and w/o the prefix
+                for prefix in set((prefix, '')):
+                    candidates.append(prefix)
+                    # add variants with our desired version added to the prefix
+                    # we use OUR numeric parts, but THEIR version separator
+                    for (is_digit, part, _) in cver.parts:
+                        if is_digit is True:
+                            candidates.append(candidates[-1] + str(part))
+                            candidates.append(candidates[-1] + sep)
+                    candidates.pop()  # pop full version with trailing sep
+                    # also add variant with our first non-numerical part
+                    for (is_digit, part, _) in cver.parts:
+                        if is_digit is False:
+                            candidates.append(prefix + part)
+                            candidates.append(prefix + part + sep)
+                            break  # just this one. it's quite random already
+            return self.filter_and_cache(project, version, candidates)
 
     def __init__(self) -> None:
         self.verbose: bool = False
@@ -260,10 +295,9 @@ class FindSources(capycli.common.script_base.ScriptBase):
                 # 'name' is a viable index, for instance an error message
                 tags = []
 
-            new_prefixes = self.tag_cache.filter_and_cache(
+            new_prefixes = self.tag_cache.gen_new_prefixes(
                 repo['full_name'], version,  # cache key
-                [self.version_regex.split(tag['name'], 1)[0]
-                 for tag in tags
+                [tag['name'] for tag in tags
                  if self.version_regex.search(tag['name']) is not None])
 
             for prefix in new_prefixes:
@@ -281,10 +315,10 @@ class FindSources(capycli.common.script_base.ScriptBase):
                 w_prefix = [itm[1] for itm in reversed(by_size)]
 
                 transformed_for_get_matching_tags = [
-                    {'name': tag.get('ref', '').replace('refs/tags/', '', 1),
+                    {'name': tag['ref'].replace('refs/tags/', '', 1),
                      'zipball_url': tag['url'].replace(
                         '/git/refs/tags/', '/zipball/refs/tags/', 1),
-                     } for tag in w_prefix]
+                     } for tag in w_prefix if 'ref' in tag]
                 source_url = self.get_matching_tag(
                     transformed_for_get_matching_tags, version, tags_url)
                 if len(source_url) > 0:  # we found what we believe is

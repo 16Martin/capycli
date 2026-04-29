@@ -22,7 +22,7 @@ class IncompatibleVersionError(Exception):
 
 class ComparableVersion:
     """Version string comparison."""
-    parts: List[Tuple[Any, Any]]
+    parts: List[Tuple[Any, ...]]
     version: str
 
     def __init__(self, version: str) -> None:
@@ -34,33 +34,33 @@ class ComparableVersion:
             raise  # pass on to caller as object is useless without self.parts
 
     @staticmethod
-    def parse(version: str) -> List[Tuple[bool, int | str]]:
+    def parse(version: str) -> List[Tuple[Any, ...]]:
         version = version.lower()
 
         isdigit = False
-        parts: List[Tuple[bool, int | str]] = []
+        parts: List[Tuple[Any, ...]] = []
         start = 0
         for i, c in enumerate(version):
             if c in [".", "-", "_"]:
-                parts.append((isdigit, version[start:i]))
+                parts.append((isdigit, version[start:i], c))
                 start = i + 1
             elif c.isdigit():
                 if not isdigit and i > start:
-                    parts.append((isdigit, version[start:i]))
+                    parts.append((isdigit, version[start:i], ''))
                     start = i
                 isdigit = True
             else:
                 if isdigit and i > start:
-                    parts.append((isdigit, version[start:i]))
+                    parts.append((isdigit, version[start:i], ''))
                     start = i
                 isdigit = False
 
         if start < len(version):
-            parts.append((isdigit, version[start:]))
+            parts.append((isdigit, version[start:], ''))
 
         for i, part in enumerate(parts):
             if part[0]:
-                parts[i] = (True, int(part[1]))
+                parts[i] = (True, int(part[1]), part[2])
 
         return parts
 
