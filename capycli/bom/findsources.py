@@ -310,15 +310,17 @@ class FindSources(capycli.common.script_base.ScriptBase):
                 # ORDER BY tag-name-length DESC
                 # Note: it may happen that the GithHubSupport.github_request
                 # returns items without 'ref'
-                by_size = sorted([(len(tag.get('ref', '')), tag) for tag in w_prefix],
+                get_label = lambda tag: tag.get('ref', tag.get('name', ''))
+                get_url = lambda tag: tag.get('url', tag.get('zipball_url', ''))
+                by_size = sorted([(len(get_label(tag)), tag) for tag in w_prefix],
                                  key=lambda x: x[0])
                 w_prefix = [itm[1] for itm in reversed(by_size)]
 
                 transformed_for_get_matching_tags = [
-                    {'name': tag['ref'].replace('refs/tags/', '', 1),
-                     'zipball_url': tag['url'].replace(
+                    {'name': get_label(tag).replace('refs/tags/', '', 1),
+                     'zipball_url': get_url(tag).replace(
                         '/git/refs/tags/', '/zipball/refs/tags/', 1),
-                     } for tag in w_prefix if 'ref' in tag]
+                     } for tag in w_prefix if 'ref' in tag or 'name' in tag]
                 source_url = self.get_matching_tag(
                     transformed_for_get_matching_tags, version, tags_url)
                 if len(source_url) > 0:  # we found what we believe is
